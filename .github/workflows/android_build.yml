@@ -1,4 +1,5 @@
-name: Build & Sign Quantum NARCAN APK (PennyLane)
+
+name: Build_and_Sign_Quantum_NARCAN_APK_PennyLane
 
 on:
   push:
@@ -10,30 +11,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ───────────── source ─────────────
-      - name: 📥 Checkout
+      # 1.  Get source
+      - name: Checkout
         uses: actions/checkout@v3
 
-      # ─────────── toolchain ───────────
-      - name: 🐍 Setup Python
+      # 2.  Toolchain
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      - name: 📦 OS dependencies
+      - name: Install OS packages
         run: |
           sudo apt update
-          sudo apt install -y build-essential git zip unzip openjdk-17-jdk \
+          sudo apt install -y \
+            build-essential git zip unzip openjdk-17-jdk \
             libffi-dev libssl-dev libjpeg-dev libfreetype6-dev libncurses6 \
             autoconf automake libtool libtool-bin pkg-config
 
-      - name: ⚙️ Install Buildozer + p4a (nightly)
+      - name: Install Buildozer and p4a
         run: |
           python -m pip install --upgrade pip
           pip install --upgrade --pre buildozer python-for-android cython cffi==1.15.1
 
-      # ───── Add PennyLane local recipe ─────
-      - name: ✍️ Add PennyLane recipe
+      # 3.  Custom PennyLane recipe
+      - name: Add PennyLane recipe
         run: |
           mkdir -p p4a-recipes/pennylane
           cat > p4a-recipes/pennylane/__init__.py <<'PY'
@@ -54,13 +56,13 @@ class PennyLaneRecipe(PythonRecipe):
         (stub / "__init__.py").write_text(textwrap.dedent("""
             def __getattr__(name):
                 raise ImportError(
-                    f'SciPy stub: {name} is unavailable in the Android build')
+                    f'SciPy stub: {name} not available in Android build')
         """))
 recipe = PennyLaneRecipe()
 PY
 
-      # ───── Configure buildozer.spec ─────
-      - name: 🔧 Patch buildozer.spec
+      # 4.  Configure buildozer.spec
+      - name: Patch buildozer.spec
         run: |
           buildozer init
           sed -i '/^# *source.include_patterns/c\source.include_patterns = narcan_finder_android.py' buildozer.spec
@@ -68,43 +70,50 @@ PY
           sed -i '/^# *package.name/c\package.name = QuantumNarcan' buildozer.spec
           sed -i '/^# *package.domain/c\package.domain = org.quantum.narcan' buildozer.spec
           sed -i '/^requirements/c\requirements = python3,kivy,kivymd,requests,httpx,numpy,psutil,cryptography,autograd,networkx,toml,sympy,pennylane' buildozer.spec
-          grep -q '^version[[:space:]]*=' buildozer.spec && sed -i 's/^version[[:space:]]*=.*/version = 0.1/' buildozer.spec || echo 'version = 0.1' >> buildozer.spec
-          grep -q '^log_level[[:space:]]*=' buildozer.spec && sed -i 's/^log_level.*/log_level = 2/' buildozer.spec || echo 'log_level = 2' >> buildozer.spec
-          grep -q '^android.permissions' buildozer.spec && sed -i 's/^android.permissions.*/android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec || echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
+          grep -q '^version[ ]*=' buildozer.spec && \
+            sed -i 's/^version[ ]*=.*/version = 0.1/' buildozer.spec || \
+            echo 'version = 0.1' >> buildozer.spec
+          grep -q '^log_level[ ]*=' buildozer.spec && \
+            sed -i 's/^log_level.*/log_level = 2/' buildozer.spec || \
+            echo 'log_level = 2' >> buildozer.spec
+          grep -q '^android.permissions' buildozer.spec && \
+            sed -i 's/^android.permissions.*/android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec || \
+            echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
           echo 'p4a.local_recipes = ./p4a-recipes' >> buildozer.spec
           echo 'p4a.branch = develop' >> buildozer.spec
           echo 'android.release_artifact = true' >> buildozer.spec
 
-      # ───── Android SDK and ephemeral key ─────
-      - name: 📥 Update SDK
+      # 5.  Android SDK and key
+      - name: Update Android SDK
         run: yes | buildozer android update
 
-      - name: 🔐 Generate ephemeral keystore
+      - name: Generate keystore
         run: |
           keytool -genkey -v -keystore quantum_temp.keystore \
             -alias quantumalias -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass testpass -keypass testpass \
             -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-      # ───── Build and sign ─────
-      - name: 🧪 Build APK
+      # 6.  Build, sign, align
+      - name: Build APK
         run: |
-          export PYTHONUNBUFFERED=1 DEBIAN_FRONTEND=noninteractive
+          export PYTHONUNBUFFERED=1
+          export DEBIAN_FRONTEND=noninteractive
           timeout 45m buildozer android release --verbose | tee buildozer_output.log
 
-      - name: 🔍 Locate unsigned APK
+      - name: Locate unsigned APK
         run: |
           APK_PATH=$(find bin -name "*-release-unsigned.apk" -print -quit)
-          if [ -z "$APK_PATH" ]; then echo "unsigned APK not found"; exit 1; fi
+          if [ -z "$APK_PATH" ]; then echo "No unsigned APK"; exit 1; fi
           echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
 
-      - name: 🔏 Sign APK
+      - name: Sign APK
         run: |
           jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 \
             -keystore quantum_temp.keystore -storepass testpass -keypass testpass \
             "$APK_PATH" quantumalias
 
-      - name: 🧩 Zipalign APK
+      - name: Zipalign APK
         run: |
           wget -q https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip
           unzip -q build-tools_r30.0.3-linux.zip -d android-tools
@@ -112,14 +121,14 @@ PY
           android-tools/**/zipalign -v 4 "$APK_PATH" "$SIGNED_APK"
           echo "SIGNED_APK=$SIGNED_APK" >> "$GITHUB_ENV"
 
-      # ───── Artifacts ─────
-      - name: 📤 Upload Signed APK
+      # 7.  Artifacts
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
           name: quantum-narcan-signed-pennylane
           path: ${{ env.SIGNED_APK }}
 
-      - name: 📤 Upload Build Log
+      - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
