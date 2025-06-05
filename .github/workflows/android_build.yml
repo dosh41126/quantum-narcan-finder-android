@@ -51,11 +51,11 @@ class PennyLaneRecipe(PythonRecipe):
         site = pathlib.Path(arch.target_python.site_packages_dir)
         stub = site / "scipy"
         stub.mkdir(exist_ok=True)
-        (stub / "__init__.py").write_text(textwrap.dedent(\"\"\"\
+        (stub / "__init__.py").write_text(textwrap.dedent("""
             def __getattr__(name):
                 raise ImportError(
                     f'SciPy stub: {name} is unavailable in the Android build')
-        \"\"\"))
+        """))
 recipe = PennyLaneRecipe()
 PY
 
