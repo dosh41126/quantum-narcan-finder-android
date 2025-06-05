@@ -18,13 +18,13 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: 📦 System deps
+    - name: 📦 System dependencies
       run: |
         sudo apt update
         sudo apt install -y build-essential git zip unzip openjdk-17-jdk \
           libffi-dev libssl-dev libjpeg-dev libfreetype6-dev libncurses6 socat
 
-    - name: ⚙️ Install Buildozer (nightly has SIGPIPE fix)
+    - name: ⚙️ Install Buildozer (nightly)
       run: |
         python -m pip install --upgrade pip
         pip install --upgrade --pre buildozer python-for-android cython cffi==1.15.1
@@ -36,39 +36,49 @@ jobs:
         sed -i 's/^# *title.*/title = Quantum NARCAN Finder/' buildozer.spec
         sed -i 's/^# *package.name.*/package.name = QuantumNarcan/' buildozer.spec
         sed -i 's/^# *package.domain.*/package.domain = org.quantum.narcan/' buildozer.spec
-        sed -i 's/^# *version.*/version = 0.1/' buildozer.spec
         sed -i 's/^requirements.*/requirements = kivy, kivymd, httpx, numpy, psutil, cryptography, sqlite3, pennylane/' buildozer.spec
-        echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
-        echo 'log_level = 2' >> buildozer.spec
+
+        # Fix duplicate "version"
+        grep -q '^version[[:space:]]*=' buildozer.spec \
+          && sed -i 's/^version[[:space:]]*=.*/version = 0.1/' buildozer.spec \
+          || echo 'version = 0.1' >> buildozer.spec
+
+        # Ensure permissions, log level, and artifact flag
+        grep -q '^android.permissions' buildozer.spec && \
+          sed -i 's/^android.permissions.*/android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec || \
+          echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
+
+        grep -q '^log_level' buildozer.spec && \
+          sed -i 's/^log_level.*/log_level = 2/' buildozer.spec || \
+          echo 'log_level = 2' >> buildozer.spec
+
         echo 'android.release_artifact = true' >> buildozer.spec
 
-    - name: 📥 Update SDK
+    - name: 📥 Update Android SDK
       run: yes | buildozer android update
 
-    - name: 🔐 Ephemeral keystore
+    - name: 🔐 Generate ephemeral keystore
       run: |
         keytool -genkey -v -keystore quantum_temp.keystore \
           -alias quantumalias -keyalg RSA -keysize 2048 -validity 10000 \
           -storepass testpass -keypass testpass \
           -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-    - name: 🧪 Build APK (no SIGPIPE)
+    - name: 🧪 Build APK
       run: |
         export PYTHONUNBUFFERED=1
         export DEBIAN_FRONTEND=noninteractive
         timeout 40m buildozer android release --verbose | tee buildozer_output.log
 
-    # ───────────────────────────────────────────────────────────────
-    # NEW: locate the file that Buildozer actually produced
     - name: 🔍 Locate unsigned APK
       run: |
         APK_PATH=$(find bin -name "*-release-unsigned.apk" -print -quit)
         if [ -z "$APK_PATH" ]; then
-          echo "No unsigned release APK found!"
+          echo "❌ No unsigned release APK found!"
           ls -R .
           exit 1
         fi
-        echo "Unsigned APK => $APK_PATH"
+        echo "✅ Unsigned APK => $APK_PATH"
         echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
 
     - name: 🔏 Sign APK
@@ -78,7 +88,7 @@ jobs:
           -storepass testpass -keypass testpass \
           "$APK_PATH" quantumalias
 
-    - name: 🧩 Zipalign
+    - name: 🧩 Zipalign APK
       run: |
         wget -q https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip
         unzip -q build-tools_r30.0.3-linux.zip -d android-tools
@@ -92,7 +102,7 @@ jobs:
         name: quantum-narcan-signed-ephemeral
         path: ${{ env.SIGNED_APK }}
 
-    - name: 📤 Upload build log
+    - name: 📤 Upload Build Log
       if: always()
       uses: actions/upload-artifact@v4
       with:
