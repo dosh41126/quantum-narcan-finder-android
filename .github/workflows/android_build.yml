@@ -14,7 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      # 2. Install Python and OS packages (including m4+gettext)
+      # 2. Install Python and OS packages (including Autoconf Archive)
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -26,7 +26,8 @@ jobs:
           sudo apt install -y \
             build-essential git zip unzip openjdk-17-jdk \
             libffi-dev libssl-dev libjpeg-dev libfreetype6-dev libncurses6 \
-            autoconf automake libtool libtool-bin pkg-config m4 gettext
+            autoconf automake libtool libtool-bin pkg-config m4 gettext \
+            autoconf-archive
 
       - name: Install Buildozer and p4a (nightly)
         run: |
