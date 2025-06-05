@@ -1,13 +1,12 @@
-name: Build KivyMD Android APK
+name: Build Quantum NARCAN APK (Ephemeral Signing Key)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build-apk:
+  build-ephemeral-apk:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,32 +22,57 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y build-essential git zip unzip openjdk-11-jdk \
-                            libncurses5 libstdc++6 libffi-dev libssl-dev \
-                            libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev
+          libncurses6 libstdc++6 libffi-dev libssl-dev \
+          libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev
 
     - name: ⚙️ Install Buildozer
       run: |
         pip install --upgrade pip
         pip install buildozer cython
 
-    - name: 🔧 Initialize Buildozer
+    - name: 🔧 Initialize Buildozer and spec file
       run: |
         buildozer init
-        sed -i 's/^# *source.include_exts/source.include_exts = py,png,jpg,kv,atlas/' buildozer.spec
-        sed -i 's/^# *requirements = .*/requirements = kivy, kivymd, httpx, numpy, psutil, cryptography, sqlite3, pennylane/' buildozer.spec
-        sed -i 's/^# *android.permissions = .*/android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec
         echo "source.include_patterns = narcan_finder_android.py" >> buildozer.spec
         echo "title = Quantum NARCAN Finder" >> buildozer.spec
         echo "package.name = QuantumNarcan" >> buildozer.spec
         echo "package.domain = org.quantum.narcan" >> buildozer.spec
+        echo "requirements = kivy, kivymd, httpx, numpy, psutil, cryptography, sqlite3, pennylane" >> buildozer.spec
+        echo "android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE" >> buildozer.spec
+        echo "android.release_artifact = true" >> buildozer.spec
         echo "log_level = 2" >> buildozer.spec
 
-    - name: 🛠 Build APK
+    - name: 🔐 Generate ephemeral keystore
       run: |
-        buildozer android debug
+        keytool -genkey -v -keystore quantum_temp.keystore \
+          -alias quantumalias \
+          -keyalg RSA -keysize 2048 -validity 10000 \
+          -storepass testpass -keypass testpass \
+          -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-    - name: 📤 Upload APK artifact
+    - name: 🧪 Build Release APK
+      run: buildozer android release
+
+    - name: 🔏 Sign APK with generated keystore
+      run: |
+        jarsigner -verbose \
+          -sigalg SHA1withRSA -digestalg SHA1 \
+          -keystore quantum_temp.keystore \
+          -storepass testpass -keypass testpass \
+          bin/QuantumNarcan-release-unsigned.apk \
+          quantumalias
+
+    - name: 🧩 Zipalign APK
+      run: |
+        wget https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip
+        unzip build-tools_r30.0.3-linux.zip -d android-tools
+        chmod +x android-tools/**/zipalign
+        android-tools/**/zipalign -v 4 \
+          bin/QuantumNarcan-release-unsigned.apk \
+          bin/QuantumNarcan-release-signed.apk
+
+    - name: 📤 Upload Signed APK
       uses: actions/upload-artifact@v4
       with:
-        name: quantum-narcan-apk
-        path: bin/*.apk
+        name: quantum-narcan-signed-ephemeral
+        path: bin/QuantumNarcan-release-signed.apk
