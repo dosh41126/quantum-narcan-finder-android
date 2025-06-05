@@ -10,37 +10,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # ─────────────────────  source  ─────────────────────
+    # ────────────────────────── source ──────────────────────────
     - name: 📥 Checkout
       uses: actions/checkout@v3
 
-    # ─────────────────────  toolchain  ──────────────────
-    - name: 🐍  Setup Python
+    # ─────────────────────── toolchain setup ─────────────────────
+    - name: 🐍 Setup Python
       uses: actions/setup-python@v4
       with: { python-version: "3.10" }
 
-    - name: 📦  OS deps
+    - name: 📦 OS dependencies
       run: |
         sudo apt update
         sudo apt install -y build-essential git zip unzip openjdk-17-jdk \
           libffi-dev libssl-dev libjpeg-dev libfreetype6-dev libncurses6
 
-    - name: ⚙️  Install Buildozer + p4a (nightly)
+    - name: ⚙️ Install Buildozer & p4a (nightly)
       run: |
         python -m pip install --upgrade pip
         pip install --upgrade --pre buildozer python-for-android cython cffi==1.15.1
 
-    # ─────────────────────  local PennyLane recipe  ─────
-    - name: ✍️  Add custom PennyLane recipe
+    # ─────────────── custom PennyLane p4a recipe ────────────────
+    - name: ✍️ Add custom PennyLane recipe
       run: |
         mkdir -p p4a-recipes/pennylane
-        cat > p4a-recipes/pennylane/__init__.py <<'PY'
+        cat > p4a-recipes/pennylane/__init__.py << 'PY'
 from pythonforandroid.recipe import PythonRecipe
 class PennyLaneRecipe(PythonRecipe):
     """
-    Minimal PennyLane build for Android.
-    * Installs PennyLane with --no-deps (so no SciPy wheels)
-    * Afterwards writes a dummy 'scipy' module to satisfy imports.
+    Minimal PennyLane build for Android: installs with --no-deps
+    and writes a stub 'scipy' so import scipy succeeds.
     """
     version = "0.36.0"
     url = "https://github.com/PennyLaneAI/pennylane/archive/refs/tags/v{version}.tar.gz"
@@ -48,77 +47,69 @@ class PennyLaneRecipe(PythonRecipe):
     call_hostpython_via_targetpython = False
 
     def build_arch(self, arch):
+        # normal PythonRecipe build
         super().build_arch(arch)
-        # Create stub scipy
-        site_packages = arch.target_python.site_packages_dir
-        self.ctx.hostpython("- <<'EOF'\n"
-                            "import os, pathlib, textwrap, sys\n"
-                            f"sp = pathlib.Path('{site_packages}')/'scipy'\n"
-                            "sp.mkdir(exist_ok=True)\n"
-                            "(sp/'__init__.py').write_text('''\\n"
-                            "def __getattr__(name):\n"
-                            "    raise ImportError('SciPy stub: function %s not available on Android' % name)\\n''')\n"
-                            "EOF")
+        # create stub scipy __init__.py
+        import pathlib, textwrap
+        site = pathlib.Path(arch.target_python.site_packages_dir)
+        stub = site / "scipy"
+        stub.mkdir(exist_ok=True)
+        (stub / "__init__.py").write_text(textwrap.dedent(\"\"\"\
+            def __getattr__(name):
+                raise ImportError(
+                    f'SciPy stub: {name} is unavailable in the Android build')
+        \"\"\"))
+recipe = PennyLaneRecipe()
 PY
-        chmod +x p4a-recipes/pennylane/__init__.py
 
-    # ─────────────────────  buildozer.spec  ─────────────
-    - name: 🔧  Init & patch buildozer.spec
+    # ─────────────── patch buildozer.spec ───────────────
+    - name: 🔧 Init & patch buildozer.spec
       run: |
         buildozer init
-
-        sed -i 's/^# *source.include_patterns.*/source.include_patterns = narcan_finder_android.py/' buildozer.spec
-        sed -i 's/^# *title.*/title = Quantum NARCAN Finder/' buildozer.spec
-        sed -i 's/^# *package.name.*/package.name = QuantumNarcan/' buildozer.spec
-        sed -i 's/^# *package.domain.*/package.domain = org.quantum.narcan/' buildozer.spec
-
-        # requirements WITH PennyLane (no SciPy)
-        sed -i 's/^requirements.*/requirements = python3,kivy,kivymd,requests,httpx,numpy,psutil,cryptography,autograd,networkx,toml,sympy,pennylane/' buildozer.spec
-
-        # single-instance keys
-        sed -i '/^version[[:space:]]*=/c\version = 0.1'      buildozer.spec || echo 'version = 0.1' >> buildozer.spec
-        sed -i '/^log_level[[:space:]]*=/c\log_level = 2'    buildozer.spec || echo 'log_level = 2' >> buildozer.spec
+        sed -i '/^# *source.include_patterns/c\source.include_patterns = narcan_finder_android.py' buildozer.spec
+        sed -i '/^# *title/c\title = Quantum NARCAN Finder' buildozer.spec
+        sed -i '/^# *package.name/c\package.name = QuantumNarcan' buildozer.spec
+        sed -i '/^# *package.domain/c\package.domain = org.quantum.narcan' buildozer.spec
+        sed -i '/^requirements/c\requirements = python3,kivy,kivymd,requests,httpx,numpy,psutil,cryptography,autograd,networkx,toml,sympy,pennylane' buildozer.spec
+        sed -i '/^version[[:space:]]*=/c\version = 0.1' buildozer.spec || echo 'version = 0.1' >> buildozer.spec
+        sed -i '/^log_level[[:space:]]*=/c\log_level = 2' buildozer.spec  || echo 'log_level = 2' >> buildozer.spec
         sed -i '/^android.permissions[[:space:]]*=/c\android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' buildozer.spec \
           || echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
-
-        # Point Buildozer to local recipes & dev branch of p4a
         echo 'p4a.local_recipes = ./p4a-recipes'  >> buildozer.spec
-        echo 'p4a.branch        = develop'        >> buildozer.spec
+        echo 'p4a.branch = develop'               >> buildozer.spec
         echo 'android.release_artifact = true'    >> buildozer.spec
 
-    - name: 📥  Update Android SDK
+    # ─────────────── Android SDK & signing key ───────────────
+    - name: 📥 Update Android SDK
       run: yes | buildozer android update
 
-    # ─────────────────────  sign-key  ───────────────────
-    - name: 🔐  Ephemeral keystore
+    - name: 🔐 Generate ephemeral keystore
       run: |
         keytool -genkey -v -keystore quantum_temp.keystore \
           -alias quantumalias -keyalg RSA -keysize 2048 -validity 10000 \
           -storepass testpass -keypass testpass \
           -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-    # ─────────────────────  build  ──────────────────────
-    - name: 🧪  Build APK (with PennyLane)
+    # ─────────────── build / sign / align ───────────────
+    - name: 🧪 Build APK (with PennyLane)
       run: |
         export PYTHONUNBUFFERED=1 DEBIAN_FRONTEND=noninteractive
         timeout 45m buildozer android release --verbose | tee buildozer_output.log
 
-    # ─────────────────────  locate / sign / align  ─────
-    - name: 🔍  Locate unsigned APK
+    - name: 🔍 Locate unsigned APK
       run: |
         APK_PATH=$(find bin -name "*-release-unsigned.apk" -print -quit)
         if [ -z "$APK_PATH" ]; then
-          echo "No unsigned release APK found ☹️"; exit 1
-        fi
+          echo "unsigned APK not found"; exit 1; fi
         echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
 
-    - name: 🔏  Sign APK
+    - name: 🔏 Sign APK
       run: |
         jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 \
           -keystore quantum_temp.keystore -storepass testpass -keypass testpass \
           "$APK_PATH" quantumalias
 
-    - name: 🧩  Zipalign
+    - name: 🧩 Zipalign
       run: |
         wget -q https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip
         unzip -q build-tools_r30.0.3-linux.zip -d android-tools
@@ -126,14 +117,14 @@ PY
         android-tools/**/zipalign -v 4 "$APK_PATH" "$SIGNED_APK"
         echo "SIGNED_APK=$SIGNED_APK" >> "$GITHUB_ENV"
 
-    # ─────────────────────  artifacts  ─────────────────
-    - name: 📤  Upload Signed APK
+    # ───────────────────── artifacts ─────────────────────
+    - name: 📤 Upload Signed APK
       uses: actions/upload-artifact@v4
       with:
         name: quantum-narcan-signed-pennylane
         path: ${{ env.SIGNED_APK }}
 
-    - name: 📤  Upload Build Log
+    - name: 📤 Upload Build Log
       if: always()
       uses: actions/upload-artifact@v4
       with:
