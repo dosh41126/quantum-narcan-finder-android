@@ -23,12 +23,13 @@ jobs:
         sudo apt update
         sudo apt install -y build-essential git zip unzip openjdk-11-jdk \
           libncurses6 libstdc++6 libffi-dev libssl-dev \
-          libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev
+          libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev \
+          socat
 
-    - name: ⚙️ Install Buildozer
+    - name: ⚙️ Install Buildozer and Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install buildozer cython
+        pip install buildozer cython cffi==1.15.1
 
     - name: 🔧 Initialize Buildozer and configure spec
       run: |
@@ -62,9 +63,11 @@ jobs:
           -storepass testpass -keypass testpass \
           -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-    - name: 🧪 Build Release APK (avoid Broken Pipe)
+    - name: 🧪 Build Release APK (TTY workaround via socat)
       run: |
-        timeout 30m stdbuf -oL -eL buildozer android release | tee buildozer_output.log
+        export PYTHONUNBUFFERED=1
+        export DEBIAN_FRONTEND=noninteractive
+        socat - EXEC:"timeout 40m buildozer android release",pty,setsid,ctty | tee buildozer_output.log
 
     - name: 🔏 Sign APK with ephemeral keystore
       run: |
@@ -89,3 +92,10 @@ jobs:
       with:
         name: quantum-narcan-signed-ephemeral
         path: bin/QuantumNarcan-release-signed.apk
+
+    - name: 📤 Upload Build Log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: buildozer-log
+        path: buildozer_output.log
