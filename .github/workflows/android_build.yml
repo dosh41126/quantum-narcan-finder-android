@@ -33,27 +33,27 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade --pre buildozer python-for-android cython cffi==1.15.1
 
-      # 3. Add PennyLane recipe via echo (no heredoc)
+      # 3. Add PennyLane recipe via echo (no heredoc, no f-strings)
       - name: Add PennyLane local recipe
         run: |
           mkdir -p p4a-recipes/pennylane
-          echo 'from pythonforandroid.recipe import PythonRecipe' > p4a-recipes/pennylane/__init__.py
-          echo '' >> p4a-recipes/pennylane/__init__.py
-          echo 'class PennyLaneRecipe(PythonRecipe):' >> p4a-recipes/pennylane/__init__.py
-          echo '    version = "0.36.0"' >> p4a-recipes/pennylane/__init__.py
-          echo '    url = "https://github.com/PennyLaneAI/pennylane/archive/refs/tags/v{version}.tar.gz"' >> p4a-recipes/pennylane/__init__.py
-          echo '    depends = ["numpy", "autograd", "networkx", "toml", "sympy", "setuptools"]' >> p4a-recipes/pennylane/__init__.py
-          echo '    call_hostpython_via_targetpython = False' >> p4a-recipes/pennylane/__init__.py
-          echo '' >> p4a-recipes/pennylane/__init__.py
-          echo '    def build_arch(self, arch):' >> p4a-recipes/pennylane/__init__.py
-          echo '        super().build_arch(arch)' >> p4a-recipes/pennylane/__init__.py
-          echo '        import pathlib' >> p4a-recipes/pennylane/__init__.py
-          echo '        site = pathlib.Path(arch.target_python.site_packages_dir)' >> p4a-recipes/pennylane/__init__.py
-          echo '        stub = site / "scipy"' >> p4a-recipes/pennylane/__init__.py
-          echo '        stub.mkdir(exist_ok=True)' >> p4a-recipes/pennylane/__init__.py
-          echo '        (stub / "__init__.py").write_text("def __getattr__(name):\\n    raise ImportError(f\'SciPy stub: {name} not available in Android build\')")' >> p4a-recipes/pennylane/__init__.py
-          echo '' >> p4a-recipes/pennylane/__init__.py
-          echo 'recipe = PennyLaneRecipe()' >> p4a-recipes/pennylane/__init__.py
+          echo "from pythonforandroid.recipe import PythonRecipe" > p4a-recipes/pennylane/__init__.py
+          echo "" >> p4a-recipes/pennylane/__init__.py
+          echo "class PennyLaneRecipe(PythonRecipe):" >> p4a-recipes/pennylane/__init__.py
+          echo "    version = \"0.36.0\"" >> p4a-recipes/pennylane/__init__.py
+          echo "    url = \"https://github.com/PennyLaneAI/pennylane/archive/refs/tags/v{version}.tar.gz\"" >> p4a-recipes/pennylane/__init__.py
+          echo "    depends = [\"numpy\", \"autograd\", \"networkx\", \"toml\", \"sympy\", \"setuptools\"]" >> p4a-recipes/pennylane/__init__.py
+          echo "    call_hostpython_via_targetpython = False" >> p4a-recipes/pennylane/__init__.py
+          echo "" >> p4a-recipes/pennylane/__init__.py
+          echo "    def build_arch(self, arch):" >> p4a-recipes/pennylane/__init__.py
+          echo "        super().build_arch(arch)" >> p4a-recipes/pennylane/__init__.py
+          echo "        import pathlib" >> p4a-recipes/pennylane/__init__.py
+          echo "        site = pathlib.Path(arch.target_python.site_packages_dir)" >> p4a-recipes/pennylane/__init__.py
+          echo "        stub = site / \"scipy\"" >> p4a-recipes/pennylane/__init__.py
+          echo "        stub.mkdir(exist_ok=True)" >> p4a-recipes/pennylane/__init__.py
+          echo "        (stub / \"__init__.py\").write_text(\"def __getattr__(name):\\n    raise ImportError('SciPy stub: not available in Android build')\")" >> p4a-recipes/pennylane/__init__.py
+          echo "" >> p4a-recipes/pennylane/__init__.py
+          echo "recipe = PennyLaneRecipe()" >> p4a-recipes/pennylane/__init__.py
 
       # 4. Patch buildozer.spec
       - name: Patch buildozer.spec
@@ -88,7 +88,7 @@ jobs:
             -storepass testpass -keypass testpass \
             -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-      # 6. Build, locate, sign, and zipalign
+      # 6. Build APK, locate, sign, and zipalign
       - name: Build APK
         run: |
           export PYTHONUNBUFFERED=1
