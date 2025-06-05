@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.10"
 
-      # 3. OS packages (note: libltdl-dev fixes LT_SYS_SYMBOL_USCORE)
+      # 3. System packages (libltdl-dev fixes LT_SYS_SYMBOL_USCORE)
       - name: Install OS packages
         run: |
           sudo apt update
@@ -30,41 +30,40 @@ jobs:
             autoconf automake libtool libtool-bin pkg-config m4 gettext \
             autoconf-archive libltdl-dev
 
-      # 4. Buildozer + python-for-android
       - name: Install Buildozer and p4a
         run: |
           python -m pip install --upgrade pip
           pip install --upgrade --pre buildozer python-for-android cython \
             cffi==1.15.1
 
-      # 5. PennyLane local recipe (tiny stub for SciPy)
+      # 4. PennyLane local recipe (single printf, no heredoc)
       - name: Add PennyLane recipe
         run: |
           mkdir -p p4a-recipes/pennylane
-          cat <<'PY' > p4a-recipes/pennylane/__init__.py
-from pythonforandroid.recipe import PythonRecipe
+          printf '%s\n' \
+            'from pythonforandroid.recipe import PythonRecipe' \
+            '' \
+            'class PennyLaneRecipe(PythonRecipe):' \
+            '    version = "0.36.0"' \
+            '    url = "https://github.com/PennyLaneAI/pennylane/archive/refs/tags/v{version}.tar.gz"' \
+            '    depends = ["numpy", "autograd", "networkx", "toml", "sympy", "setuptools"]' \
+            '    call_hostpython_via_targetpython = False' \
+            '' \
+            '    def build_arch(self, arch):' \
+            '        super().build_arch(arch)' \
+            '        import pathlib' \
+            '        site = pathlib.Path(arch.target_python.site_packages_dir)' \
+            '        stub = site / "scipy"' \
+            '        stub.mkdir(exist_ok=True)' \
+            '        (stub / "__init__.py").write_text('\
+            '"def __getattr__(name):\\n"\
+            "    raise ImportError(\'SciPy stub: not available in Android build\')"\
+            ')' \
+            '' \
+            'recipe = PennyLaneRecipe()' \
+            > p4a-recipes/pennylane/__init__.py
 
-class PennyLaneRecipe(PythonRecipe):
-    version = "0.36.0"
-    url = "https://github.com/PennyLaneAI/pennylane/archive/refs/tags/v{version}.tar.gz"
-    depends = ["numpy", "autograd", "networkx", "toml", "sympy", "setuptools"]
-    call_hostpython_via_targetpython = False
-
-    def build_arch(self, arch):
-        super().build_arch(arch)
-        import pathlib
-        site = pathlib.Path(arch.target_python.site_packages_dir)
-        stub = site / "scipy"
-        stub.mkdir(exist_ok=True)
-        stub.joinpath("__init__.py").write_text(
-            "def __getattr__(name):\\n"
-            "    raise ImportError('SciPy stub: not available in Android build')\\n"
-        )
-
-recipe = PennyLaneRecipe()
-PY
-
-      # 6. buildozer.spec tweaks
+      # 5. buildozer.spec tweaks
       - name: Patch buildozer.spec
         run: |
           buildozer init
@@ -81,7 +80,7 @@ PY
           echo 'p4a.branch = develop' >> buildozer.spec
           echo 'android.release_artifact = true' >> buildozer.spec
 
-      # 7. Android SDK and keystore
+      # 6. Android SDK & keystore
       - name: Update Android SDK
         run: yes | buildozer android update
 
@@ -92,7 +91,7 @@ PY
             -storepass testpass -keypass testpass \
             -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-      # 8. Build, sign, align
+      # 7. Build, sign, align
       - name: Build APK
         run: |
           export PYTHONUNBUFFERED=1 DEBIAN_FRONTEND=noninteractive
@@ -100,7 +99,7 @@ PY
 
       - name: Locate unsigned APK
         run: |
-          APK_PATH=$(find bin -name "*-release-unsigned.apk" -print -quit)
+          APK_PATH=$(find bin -name '*-release-unsigned.apk' -print -quit)
           if [ -z "$APK_PATH" ]; then echo "No unsigned APK"; exit 1; fi
           echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
 
@@ -118,7 +117,7 @@ PY
           android-tools/**/zipalign -v 4 "$APK_PATH" "$SIGNED_APK"
           echo "SIGNED_APK=$SIGNED_APK" >> "$GITHUB_ENV"
 
-      # 9. Artifacts
+      # 8. Artifacts
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
