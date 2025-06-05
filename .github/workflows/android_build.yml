@@ -39,20 +39,22 @@ jobs:
         sed -i 's/^# *package.name.*/package.name = QuantumNarcan/' buildozer.spec
         sed -i 's/^# *package.domain.*/package.domain = org.quantum.narcan/' buildozer.spec
 
-        # Replace existing requirements line
+        # Replace existing lines
         sed -i 's/^requirements.*/requirements = kivy, kivymd, httpx, numpy, psutil, cryptography, sqlite3, pennylane/' buildozer.spec
 
-        # Replace or append permissions
         grep -q '^android.permissions' buildozer.spec && \
           sed -i 's/^android.permissions.*/android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec || \
           echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
 
-        # Replace or append log level
         grep -q '^log_level' buildozer.spec && \
           sed -i 's/^log_level.*/log_level = 2/' buildozer.spec || \
           echo 'log_level = 2' >> buildozer.spec
 
         echo "android.release_artifact = true" >> buildozer.spec
+
+    - name: 📥 Install Android SDK components manually
+      run: |
+        yes | buildozer android update
 
     - name: 🔐 Generate ephemeral keystore
       run: |
