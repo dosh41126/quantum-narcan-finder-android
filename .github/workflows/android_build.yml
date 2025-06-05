@@ -1,4 +1,4 @@
-name: Build Quantum NARCAN APK (Ephemeral Signing Key)
+name: Build and Sign Quantum NARCAN APK (Ephemeral Key)
 
 on:
   push:
@@ -30,17 +30,22 @@ jobs:
         pip install --upgrade pip
         pip install buildozer cython
 
-    - name: 🔧 Initialize Buildozer and spec file
+    - name: 🔧 Initialize Buildozer and configure spec
       run: |
         buildozer init
-        echo "source.include_patterns = narcan_finder_android.py" >> buildozer.spec
-        echo "title = Quantum NARCAN Finder" >> buildozer.spec
-        echo "package.name = QuantumNarcan" >> buildozer.spec
-        echo "package.domain = org.quantum.narcan" >> buildozer.spec
-        echo "requirements = kivy, kivymd, httpx, numpy, psutil, cryptography, sqlite3, pennylane" >> buildozer.spec
-        echo "android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE" >> buildozer.spec
+
+        sed -i 's/^# *source.include_patterns.*/source.include_patterns = narcan_finder_android.py/' buildozer.spec
+        sed -i 's/^# *title.*/title = Quantum NARCAN Finder/' buildozer.spec
+        sed -i 's/^# *package.name.*/package.name = QuantumNarcan/' buildozer.spec
+        sed -i 's/^# *package.domain.*/package.domain = org.quantum.narcan/' buildozer.spec
+        sed -i 's/^# *requirements.*/requirements = kivy, kivymd, httpx, numpy, psutil, cryptography, sqlite3, pennylane/' buildozer.spec
+        sed -i 's/^# *android.permissions.*/android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec
+
+        grep -q '^log_level' buildozer.spec && \
+          sed -i 's/^log_level.*/log_level = 2/' buildozer.spec || \
+          echo 'log_level = 2' >> buildozer.spec
+
         echo "android.release_artifact = true" >> buildozer.spec
-        echo "log_level = 2" >> buildozer.spec
 
     - name: 🔐 Generate ephemeral keystore
       run: |
@@ -53,7 +58,7 @@ jobs:
     - name: 🧪 Build Release APK
       run: buildozer android release
 
-    - name: 🔏 Sign APK with generated keystore
+    - name: 🔏 Sign APK with ephemeral keystore
       run: |
         jarsigner -verbose \
           -sigalg SHA1withRSA -digestalg SHA1 \
@@ -65,7 +70,7 @@ jobs:
     - name: 🧩 Zipalign APK
       run: |
         wget https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip
-        unzip build-tools_r30.0.3-linux.zip -d android-tools
+        unzip -q build-tools_r30.0.3-linux.zip -d android-tools
         chmod +x android-tools/**/zipalign
         android-tools/**/zipalign -v 4 \
           bin/QuantumNarcan-release-unsigned.apk \
