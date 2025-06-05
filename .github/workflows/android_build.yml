@@ -16,22 +16,21 @@ jobs:
     - name: 🐍 Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: "3.10"
 
     - name: 📦 Install system dependencies
       run: |
         sudo apt update
         sudo apt install -y build-essential git zip unzip openjdk-11-jdk \
           libncurses6 libstdc++6 libffi-dev libssl-dev \
-          libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev \
-          socat
+          libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev
 
-    - name: ⚙️ Install Buildozer and Python dependencies
+    - name: ⚙️ Install Buildozer + Python deps
       run: |
         python -m pip install --upgrade pip
         pip install buildozer cython cffi==1.15.1
 
-    - name: 🔧 Initialize Buildozer and configure spec
+    - name: 🔧 Init Buildozer + patch spec
       run: |
         buildozer init
 
@@ -41,19 +40,25 @@ jobs:
         sed -i 's/^# *package.domain.*/package.domain = org.quantum.narcan/' buildozer.spec
         sed -i 's/^requirements.*/requirements = kivy, kivymd, httpx, numpy, psutil, cryptography, sqlite3, pennylane/' buildozer.spec
 
+        # permissions & logging
         grep -q '^android.permissions' buildozer.spec && \
           sed -i 's/^android.permissions.*/android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec || \
           echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
-
         grep -q '^log_level' buildozer.spec && \
           sed -i 's/^log_level.*/log_level = 2/' buildozer.spec || \
           echo 'log_level = 2' >> buildozer.spec
 
+        # NEW: completely non-interactive
+        grep -q '^android.accept_sdk_license' buildozer.spec && \
+          sed -i 's/^android.accept_sdk_license.*/android.accept_sdk_license = True/' buildozer.spec || \
+          echo 'android.accept_sdk_license = True' >> buildozer.spec
+        grep -q '^android.skip_update' buildozer.spec && \
+          sed -i 's/^android.skip_update.*/android.skip_update = True/' buildozer.spec || \
+          echo 'android.skip_update = True' >> buildozer.spec
+
         echo "android.release_artifact = true" >> buildozer.spec
 
-    - name: 📥 Install Android SDK components manually
-      run: |
-        yes | buildozer android update
+    # ▸▸ No more `yes | buildozer android update` step ⬅⬅
 
     - name: 🔐 Generate ephemeral keystore
       run: |
@@ -63,13 +68,14 @@ jobs:
           -storepass testpass -keypass testpass \
           -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-    - name: 🧪 Build Release APK (TTY workaround via socat)
+    - name: 🧪 Build Release APK
+      env:
+        PYTHONUNBUFFERED: "1"
+        DEBIAN_FRONTEND: noninteractive
       run: |
-        export PYTHONUNBUFFERED=1
-        export DEBIAN_FRONTEND=noninteractive
-        socat - EXEC:"timeout 40m buildozer android release",pty,setsid,ctty | tee buildozer_output.log
+        timeout 40m buildozer android release --verbose | tee buildozer_output.log
 
-    - name: 🔏 Sign APK with ephemeral keystore
+    - name: 🔏 Sign APK
       run: |
         jarsigner -verbose \
           -sigalg SHA1withRSA -digestalg SHA1 \
@@ -80,9 +86,8 @@ jobs:
 
     - name: 🧩 Zipalign APK
       run: |
-        wget https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip
+        wget -q https://dl.google.com/android/repository/build-tools_r30.0.3-linux.zip
         unzip -q build-tools_r30.0.3-linux.zip -d android-tools
-        chmod +x android-tools/**/zipalign
         android-tools/**/zipalign -v 4 \
           bin/QuantumNarcan-release-unsigned.apk \
           bin/QuantumNarcan-release-signed.apk
@@ -93,7 +98,7 @@ jobs:
         name: quantum-narcan-signed-ephemeral
         path: bin/QuantumNarcan-release-signed.apk
 
-    - name: 📤 Upload Build Log
+    - name: 📤 Upload Build Log (always)
       if: always()
       uses: actions/upload-artifact@v4
       with:
