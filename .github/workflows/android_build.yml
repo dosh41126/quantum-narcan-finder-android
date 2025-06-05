@@ -10,17 +10,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      #######################################################################
-      # 1‒2.  Source checkout and toolchain setup
-      #######################################################################
+      # 1. Checkout
       - name: Checkout
         uses: actions/checkout@v3
 
+      # 2. Python toolchain
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
+      # 3. OS packages (note: libltdl-dev fixes LT_SYS_SYMBOL_USCORE)
       - name: Install OS packages
         run: |
           sudo apt update
@@ -28,27 +28,25 @@ jobs:
             build-essential git zip unzip openjdk-17-jdk \
             libffi-dev libssl-dev libjpeg-dev libfreetype6-dev libncurses6 \
             autoconf automake libtool libtool-bin pkg-config m4 gettext \
-            autoconf-archive libltdl-dev   # ← provides ltdl.m4 & LT_* macros
+            autoconf-archive libltdl-dev
 
-      - name: Install Buildozer and python-for-android
+      # 4. Buildozer + python-for-android
+      - name: Install Buildozer and p4a
         run: |
           python -m pip install --upgrade pip
           pip install --upgrade --pre buildozer python-for-android cython \
             cffi==1.15.1
 
-      #######################################################################
-      # 3.  Local PennyLane recipe (written line-by-line to avoid heredocs)
-      #######################################################################
+      # 5. PennyLane local recipe (tiny stub for SciPy)
       - name: Add PennyLane recipe
         run: |
           mkdir -p p4a-recipes/pennylane
-          cat > p4a-recipes/pennylane/__init__.py <<'PY'
+          cat <<'PY' > p4a-recipes/pennylane/__init__.py
 from pythonforandroid.recipe import PythonRecipe
 
 class PennyLaneRecipe(PythonRecipe):
     version = "0.36.0"
-    url = ("https://github.com/PennyLaneAI/pennylane/archive/"
-           "refs/tags/v{version}.tar.gz")
+    url = "https://github.com/PennyLaneAI/pennylane/archive/refs/tags/v{version}.tar.gz"
     depends = ["numpy", "autograd", "networkx", "toml", "sympy", "setuptools"]
     call_hostpython_via_targetpython = False
 
@@ -59,17 +57,14 @@ class PennyLaneRecipe(PythonRecipe):
         stub = site / "scipy"
         stub.mkdir(exist_ok=True)
         stub.joinpath("__init__.py").write_text(
-            "def __getattr__(name):\n"
-            "    raise ImportError('SciPy stub: not available in "
-            "Android build')\n"
+            "def __getattr__(name):\\n"
+            "    raise ImportError('SciPy stub: not available in Android build')\\n"
         )
 
 recipe = PennyLaneRecipe()
 PY
 
-      #######################################################################
-      # 4.  Patch buildozer.spec
-      #######################################################################
+      # 6. buildozer.spec tweaks
       - name: Patch buildozer.spec
         run: |
           buildozer init
@@ -78,47 +73,35 @@ PY
           sed -i '/^# *package.name/c\package.name = QuantumNarcan' buildozer.spec
           sed -i '/^# *package.domain/c\package.domain = org.quantum.narcan' buildozer.spec
           sed -i '/^requirements/c\requirements = python3,kivy,kivymd,requests,httpx,numpy,psutil,cryptography,autograd,networkx,toml,sympy,pennylane' buildozer.spec
-          grep -q '^version[[:space:]]*=' buildozer.spec && \
-            sed -i 's/^version[[:space:]]*=.*/version = 0.1/' buildozer.spec \
-            || echo 'version = 0.1' >> buildozer.spec
-          grep -q '^log_level[[:space:]]*=' buildozer.spec && \
-            sed -i 's/^log_level.*/log_level = 2/' buildozer.spec \
-            || echo 'log_level = 2' >> buildozer.spec
-          grep -q '^android.permissions' buildozer.spec && \
-            sed -i 's/^android.permissions.*/android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec \
-            || echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
+          grep -q '^version[[:space:]]*=' buildozer.spec || echo 'version = 0.1' >> buildozer.spec
+          grep -q '^log_level[[:space:]]*=' buildozer.spec || echo 'log_level = 2' >> buildozer.spec
+          grep -q '^android.permissions' buildozer.spec || \
+            echo 'android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE' >> buildozer.spec
           echo 'p4a.local_recipes = ./p4a-recipes' >> buildozer.spec
           echo 'p4a.branch = develop' >> buildozer.spec
           echo 'android.release_artifact = true' >> buildozer.spec
 
-      #######################################################################
-      # 5.  Android SDK update & ephemeral keystore
-      #######################################################################
+      # 7. Android SDK and keystore
       - name: Update Android SDK
         run: yes | buildozer android update
 
-      - name: Generate ephemeral keystore
+      - name: Generate keystore
         run: |
           keytool -genkey -v -keystore quantum_temp.keystore \
             -alias quantumalias -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass testpass -keypass testpass \
             -dname "CN=QuantumNarcan,O=OpenAI,L=Greenville,ST=SC,C=US"
 
-      #######################################################################
-      # 6.  Build, sign, and zipalign APK
-      #######################################################################
+      # 8. Build, sign, align
       - name: Build APK
         run: |
-          export PYTHONUNBUFFERED=1
-          export DEBIAN_FRONTEND=noninteractive
+          export PYTHONUNBUFFERED=1 DEBIAN_FRONTEND=noninteractive
           timeout 45m buildozer android release --verbose | tee buildozer_output.log
 
       - name: Locate unsigned APK
         run: |
           APK_PATH=$(find bin -name "*-release-unsigned.apk" -print -quit)
-          if [ -z "$APK_PATH" ]; then
-            echo "❌ Unsigned APK not found"; exit 1
-          fi
+          if [ -z "$APK_PATH" ]; then echo "No unsigned APK"; exit 1; fi
           echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
 
       - name: Sign APK
@@ -135,9 +118,7 @@ PY
           android-tools/**/zipalign -v 4 "$APK_PATH" "$SIGNED_APK"
           echo "SIGNED_APK=$SIGNED_APK" >> "$GITHUB_ENV"
 
-      #######################################################################
-      # 7.  Upload artifacts
-      #######################################################################
+      # 9. Artifacts
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
